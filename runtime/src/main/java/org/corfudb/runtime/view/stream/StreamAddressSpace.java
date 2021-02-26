@@ -133,6 +133,9 @@ public class StreamAddressSpace {
     public void trim(Long trimMark) {
         if (!Address.isAddress(trimMark)) {
             // If not valid address return and do not attempt to trim.
+            if (log.isTraceEnabled()) {
+                log.trace("trim: attempting to trim non-valid address {}", trimMark);
+            }
             return;
         }
 
