@@ -17,7 +17,9 @@ import org.corfudb.runtime.exceptions.WriteSizeException;
 import org.corfudb.runtime.exceptions.unrecoverable.UnrecoverableCorfuError;
 import org.corfudb.runtime.object.CorfuCompileProxy;
 import org.corfudb.runtime.object.ICorfuSMR;
+import org.corfudb.runtime.object.ICorfuSMRProxyInternal;
 import org.corfudb.runtime.object.transactions.AbstractTransactionalContext;
+import org.corfudb.runtime.object.transactions.ConflictSetInfo;
 import org.corfudb.runtime.object.transactions.Transaction;
 import org.corfudb.runtime.object.transactions.Transaction.TransactionBuilder;
 import org.corfudb.runtime.object.transactions.TransactionType;
@@ -27,8 +29,11 @@ import org.corfudb.util.MetricsUtils;
 
 import javax.annotation.Nonnull;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+
+import static org.corfudb.util.Utils.bytesToHex;
 
 /**
  * A view of the objects inside a Corfu instance.
@@ -155,8 +160,35 @@ public class ObjectsView extends AbstractView {
             context.getTxOpDurationContext().stop();
         }
 
+        // check if queueue is contained and get key
+        //context.getWriteSetInfo().getAffectedStreams()
+
+
+
         // Create a timer to measure the transaction commit duration
         Timer txCommitDurationTimer = context.getMetrics().timer(TXN_COMMIT_TIMER_NAME);
+        log.info("TXEnd[{} {}] R-set {} W-set {}", context, context.transaction.getType(),
+                context.getReadSetInfo().getHashedConflictSet().size(),
+                context.getWriteSetInfo().getHashedConflictSet().size());
+
+        for (Map.Entry<ICorfuSMRProxyInternal,Set<Object>> entry : context.getWriteSetInfo().getConflicts().entrySet()) {
+            if (entry.getKey().getStreamID().equals(UUID.fromString("9b3ea528-f870-3cc0-89af-79b7a8269fce"))) {
+                for (Object obj : entry.getValue()) {
+                    byte[] hash = ConflictSetInfo.generateHashFromObject(entry.getKey(), obj);
+                    log.info("TXEnd[{}] enqueueKey(write) {} hash {}", context, obj, bytesToHex(hash));
+                }
+            }
+        }
+
+        for (Map.Entry<ICorfuSMRProxyInternal,Set<Object>> entry : context.getReadSetInfo().getConflicts().entrySet()) {
+            if (entry.getKey().getStreamID().equals(UUID.fromString("9b3ea528-f870-3cc0-89af-79b7a8269fce"))) {
+                for (Object obj : entry.getValue()) {
+                    byte[] hash = ConflictSetInfo.generateHashFromObject(entry.getKey(), obj);
+                    log.info("TXEnd[{}] enqueueKey(read) {} hash {}", context, obj, bytesToHex(hash));
+                }
+            }
+        }
+
         try (Timer.Context txCommitDuration =
                      MetricsUtils.getConditionalContext(txCommitDurationTimer)){
             return TransactionalContext.getCurrentContext().commitTransaction();

@@ -1273,6 +1273,7 @@ public class CorfuRuntime {
 
         garbageCollector.start();
 
+        log.info("CorfuRuntime: tracking {}", UUID.fromString("9b3ea528-f870-3cc0-89af-79b7a8269fce"));
         return this;
     }
 

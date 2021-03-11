@@ -218,7 +218,7 @@ public class OptimisticTransactionalContext extends AbstractTransactionalContext
     @SuppressWarnings("unchecked")
     public long commitTransaction() throws TransactionAbortedException {
         log.debug("TX[{}] request optimistic commit", this);
-
+        // shouldnt this also add writes?
         return getConflictSetAndCommit(getReadSetInfo());
     }
 

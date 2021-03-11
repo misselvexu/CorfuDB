@@ -66,6 +66,7 @@ public class TransactionAbortedException extends RuntimeException {
             byte[] conflictKey, UUID conflictStream, Long offendingAddress,
             AbortCause abortCause, Throwable cause, AbstractTransactionalContext context) {
         super("TX ABORT "
+                + "NEED TO ADD TYPE"
                 + " | Snapshot Time = " + txResolutionInfo.getSnapshotTimestamp()
                 + " | Failed Transaction ID = " + txResolutionInfo.getTXid()
                 + " | Offending Address = " + offendingAddress

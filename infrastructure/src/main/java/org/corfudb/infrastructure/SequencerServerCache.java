@@ -2,7 +2,6 @@ package org.corfudb.infrastructure;
 
 import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.Gauge;
-import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.corfudb.common.metrics.micrometer.MeterRegistryProvider;
@@ -227,7 +226,6 @@ public class SequencerServerCache {
     /**
      * Contains the conflict hash code for a stream ID and conflict param.
      */
-    @EqualsAndHashCode
     public static class ConflictTxStream {
 
         @Getter
@@ -235,7 +233,6 @@ public class SequencerServerCache {
         @Getter
         private final byte[] conflictParam;
 
-        @EqualsAndHashCode.Exclude
         public final long txVersion;
 
         public ConflictTxStream(UUID streamId, byte[] conflictParam, long address) {
@@ -247,6 +244,31 @@ public class SequencerServerCache {
         @Override
         public String toString() {
             return streamId.toString() + conflictParam;
+        }
+
+        public boolean equals(final Object o) {
+            if (o == this) return true;
+            if (!(o instanceof ConflictTxStream)) return false;
+            final ConflictTxStream other = (ConflictTxStream) o;
+            if (!other.canEqual((Object) this)) return false;
+            final Object this$streamId = this.streamId;
+            final Object other$streamId = other.streamId;
+            if (this$streamId == null ? other$streamId != null : !this$streamId.equals(other$streamId)) return false;
+            if (!java.util.Arrays.equals(this.conflictParam, other.conflictParam)) return false;
+            return true;
+        }
+
+        protected boolean canEqual(final Object other) {
+            return other instanceof ConflictTxStream;
+        }
+
+        public int hashCode() {
+            final int PRIME = 59;
+            int result = 1;
+            final Object $streamId = this.streamId;
+            result = result * PRIME + ($streamId == null ? 43 : $streamId.hashCode());
+            result = result * PRIME + java.util.Arrays.hashCode(this.conflictParam);
+            return result;
         }
     }
 }

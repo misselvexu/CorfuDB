@@ -604,6 +604,7 @@ public class SequencerServer extends AbstractServer {
                     .forEach((key, value) -> {
                         // insert an entry with the new timestamp using the
                         // hash code based on the param and the stream id.
+                        // THIS should fauil
                         value.forEach(conflictParam ->
                                 cache.put(new ConflictTxStream(key, conflictParam, newTail - 1)));
                     });

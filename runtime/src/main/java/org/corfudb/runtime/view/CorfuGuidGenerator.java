@@ -97,6 +97,7 @@ class CorfuGuid {
 
 @Slf4j
 public class CorfuGuidGenerator implements OrderedGuidGenerator {
+    // This is not checkpointed
     private final String GUID_STREAM_NAME = "CORFU_GUID_COUNTER_STREAM";
     private final Integer GUID_STREAM_KEY = 0xdeadbeef;
 
