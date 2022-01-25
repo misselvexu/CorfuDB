@@ -112,9 +112,10 @@ public final class FileSystemAgent {
     private long getFileSystemCapacity() {
         Path corfuDir = config.logDir.getParent();
         try {
-            return Files.getFileStore(corfuDir).getTotalSpace();
+            FileStore fs = Files.getFileStore(corfuDir);
+            return fs.getTotalSpace();
         } catch (IOException e) {
-            throw new IllegalStateException("Failed reading corfu log directory, path: " + corfuDir, e);
+            throw new LogUnitException("Failed reading corfu log directory, path: " + corfuDir, e);
         }
     }
 
