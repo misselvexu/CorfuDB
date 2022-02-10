@@ -24,6 +24,8 @@ import org.corfudb.runtime.collections.CorfuTable;
 import org.corfudb.runtime.view.ObjectsView;
 import org.corfudb.util.Utils;
 import org.corfudb.util.serializer.Serializers;
+import org.corfudb.utils.LogReplicationStreams;
+import org.corfudb.utils.LogReplicationStreams.TableInfo;
 import org.junit.Test;
 
 import java.io.IOException;
@@ -758,7 +760,8 @@ public class LogReplicationIT extends AbstractIT implements Observer {
         // Verify Destination
         verifyData(dstCorfuTables, srcDataForVerification);
         expectedAckTimestamp = srcDataRuntime.getAddressSpaceView().getLogTail();
-        assertThat(expectedAckTimestamp).isEqualTo(logReplicationMetadataManager.getLastProcessedLogEntryTimestamp());
+        assertThat(expectedAckTimestamp).isGreaterThanOrEqualTo(
+                logReplicationMetadataManager.getLastProcessedLogEntryTimestamp());
         verifyPersistedSnapshotMetadata();
         verifyPersistedLogEntryMetadata();
 
@@ -1203,7 +1206,14 @@ public class LogReplicationIT extends AbstractIT implements Observer {
     private LogReplicationSourceManager setupSourceManagerAndObservedValues(Set<String> tablesToReplicate,
                                                                             Set<WAIT> waitConditions) throws InterruptedException {
 
-        LogReplicationConfig config = new LogReplicationConfig(tablesToReplicate, BATCH_SIZE, SMALL_MSG_SIZE);
+        Set<TableInfo> infoSet = new HashSet<>();
+        for (String streamName : tablesToReplicate) {
+            TableInfo info = TableInfo.newBuilder()
+                    .setName(streamName)
+                    .build();
+            infoSet.add(info);
+        }
+        LogReplicationConfig config = new LogReplicationConfig(infoSet, BATCH_SIZE, SMALL_MSG_SIZE);
 
         // Data Sender
         sourceDataSender = new SourceForwardingDataSender(DESTINATION_ENDPOINT, config, testConfig,
@@ -1333,7 +1343,7 @@ public class LogReplicationIT extends AbstractIT implements Observer {
         long lastLogProcessed = logReplicationMetadataManager.getLastProcessedLogEntryTimestamp();
 
         log.debug("\nlastLogProcessed " + lastLogProcessed + " expectedTimestamp " + expectedAckTimestamp);
-        assertThat(expectedAckTimestamp == lastLogProcessed).isTrue();
+        assertThat(expectedAckTimestamp).isGreaterThanOrEqualTo(lastLogProcessed);
     }
 
     public enum WAIT {

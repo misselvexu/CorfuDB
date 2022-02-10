@@ -5,7 +5,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.corfudb.infrastructure.logreplication.LogReplicationConfig;
 import org.corfudb.protocols.logprotocol.OpaqueEntry;
 import org.corfudb.protocols.logprotocol.SMREntry;
-import org.corfudb.runtime.CorfuRuntime;
 import org.corfudb.runtime.LogReplication.LogReplicationEntryMetadataMsg;
 import org.corfudb.runtime.LogReplication.LogReplicationEntryMsg;
 import org.corfudb.runtime.LogReplication.LogReplicationEntryType;
@@ -14,9 +13,10 @@ import org.corfudb.runtime.view.Address;
 import org.corfudb.infrastructure.logreplication.replication.receive.LogReplicationMetadataManager.LogReplicationMetadataType;
 
 import javax.annotation.concurrent.NotThreadSafe;
-import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.corfudb.protocols.service.CorfuProtocolLogReplication.extractOpaqueEntries;
@@ -29,7 +29,7 @@ import static org.corfudb.protocols.service.CorfuProtocolLogReplication.extractO
 @Slf4j
 public class LogEntryWriter {
     private final LogReplicationMetadataManager logReplicationMetadataManager;
-    private final HashMap<UUID, String> streamMap; //the set of streams that log entry writer will work on.
+    private final Set<UUID> streamsSet; //the set of streams that log entry writer will work on.
     private long srcGlobalSnapshot; //the source snapshot that the transaction logs are based
     private long lastMsgTs; //the timestamp of the last message processed.
     private Map<UUID, List<UUID>> dataStreamToTagsMap;
@@ -38,10 +38,8 @@ public class LogEntryWriter {
         this.logReplicationMetadataManager = logReplicationMetadataManager;
         this.srcGlobalSnapshot = Address.NON_ADDRESS;
         this.lastMsgTs = Address.NON_ADDRESS;
-        this.streamMap = new HashMap<>();
+        this.streamsSet = new HashSet<>(config.getStreamsInfo().getStreamIds());
         this.dataStreamToTagsMap = config.getDataStreamToTagsMap();
-
-        config.getStreamsToReplicate().stream().forEach(stream -> streamMap.put(CorfuRuntime.getStreamID(stream), stream));
     }
 
     /**
@@ -92,10 +90,11 @@ public class LogEntryWriter {
             // Skip Opaque entries with timestamp that are not larger than persistedTs
             OpaqueEntry[] newOpaqueEntryList = opaqueEntryList.stream().filter(x -> x.getVersion() > persistedLogTs).toArray(OpaqueEntry[]::new);
 
+            // TODO: Should we remove this check?
             // Check that all opaque entries contain the correct streams
             for (OpaqueEntry opaqueEntry : newOpaqueEntryList) {
-                if (!streamMap.keySet().containsAll(opaqueEntry.getEntries().keySet())) {
-                    log.error("txMessage contains noisy streams {}, expecting {}", opaqueEntry.getEntries().keySet(), streamMap);
+                if (!streamsSet.containsAll(opaqueEntry.getEntries().keySet())) {
+                    log.error("txMessage contains noisy streams {}, expecting {}", opaqueEntry.getEntries().keySet(), streamsSet);
                     throw new ReplicationWriterException("Wrong streams set");
                 }
             }

@@ -41,7 +41,7 @@ import static org.corfudb.protocols.CorfuProtocolCommon.getUUID;
 import static org.corfudb.protocols.service.CorfuProtocolLogReplication.extractOpaqueEntries;
 
 /**
- * This class represents the entity responsible of writing streams' snapshots into the standby cluster DB.
+ * This class represents the entity responsible for writing streams' snapshots into the standby cluster DB.
  *
  * Snapshot sync is the process of transferring a snapshot of the DB, for this reason, data is temporarily applied
  * to shadow streams in an effort to avoid inconsistent states. Once all the data is received, the shadow streams
@@ -55,7 +55,6 @@ public class StreamsSnapshotWriter implements SnapshotWriter {
     private static final String SHADOW_STREAM_SUFFIX = "_SHADOW";
 
     // Mapping from regular stream Id to stream Name
-    private final HashMap<UUID, String> streamViewMap;
     private final CorfuRuntime rt;
 
     private long topologyConfigId;
@@ -80,7 +79,6 @@ public class StreamsSnapshotWriter implements SnapshotWriter {
     public StreamsSnapshotWriter(CorfuRuntime rt, LogReplicationConfig config, LogReplicationMetadataManager logReplicationMetadataManager) {
         this.rt = rt;
         this.logReplicationMetadataManager = logReplicationMetadataManager;
-        this.streamViewMap = new HashMap<>();
         this.regularToShadowStreamId = new HashMap<>();
         this.phase = Phase.TRANSFER_PHASE;
         this.snapshotSyncStartMarker = Optional.empty();
@@ -106,15 +104,12 @@ public class StreamsSnapshotWriter implements SnapshotWriter {
     private void initializeShadowStreams(LogReplicationConfig config) {
         // For every stream create a shadow stream which name is unique based
         // on the original stream and a suffix.
-        for (String streamName : config.getStreamsToReplicate()) {
-            String shadowStreamName = streamName + SHADOW_STREAM_SUFFIX;
-            UUID streamId = CorfuRuntime.getStreamID(streamName);
+        for (UUID streamId : config.getStreamsInfo().getStreamIds()) {
+            String shadowStreamName = streamId + SHADOW_STREAM_SUFFIX;
             UUID shadowStreamId = CorfuRuntime.getStreamID(shadowStreamName);
             regularToShadowStreamId.put(streamId, shadowStreamId);
-            regularToShadowStreamId.put(shadowStreamId, streamId);
-            streamViewMap.put(streamId, streamName);
 
-            log.trace("Shadow stream=[{}] for regular stream=[{}] name=({})", shadowStreamId, streamId, streamName);
+            log.trace("Shadow stream=[{}] for regular stream=[{}]", shadowStreamId, streamId);
         }
 
         log.info("Stream tag map for streaming on Standby/Sink total={}, streams={}", dataStreamToTagsMap.size(),
@@ -349,8 +344,8 @@ public class StreamsSnapshotWriter implements SnapshotWriter {
      */
     public void applyShadowStreams() {
         long snapshot = rt.getAddressSpaceView().getLogTail();
-        log.debug("Apply Shadow Streams, total={}", streamViewMap.size());
-        for (UUID regularStreamId : streamViewMap.keySet()) {
+        log.debug("Apply Shadow Streams, total={}", regularToShadowStreamId.size());
+        for (UUID regularStreamId : regularToShadowStreamId.keySet()) {
             applyShadowStream(regularStreamId, snapshot);
         }
         // Invalidate client cache after snapshot sync is completed, as shadow streams are no longer useful in the cache
@@ -388,12 +383,12 @@ public class StreamsSnapshotWriter implements SnapshotWriter {
         // Note: we cannot clear any stream which has not evidenced updates either on active or standby because
         // we would be enforcing an update without opening the stream, hence, leading to "apparent" data loss as
         // checkpoint won't run on these streams
-        Set<UUID> streamsToQuery = streamViewMap.keySet().stream()
+        Set<UUID> streamsToQuery = regularToShadowStreamId.keySet().stream()
                 .filter(id -> !replicatedStreamIds.contains(id))
                 .collect(Collectors.toCollection(HashSet::new));
 
         log.debug("Total of {} streams were replicated from active out of {}, sequencer query for {}, streamsToQuery={}",
-                replicatedStreamIds.size(), streamViewMap.size(), streamsToQuery.size(), streamsToQuery);
+                replicatedStreamIds.size(), regularToShadowStreamId.size(), streamsToQuery.size(), streamsToQuery);
         Set<UUID> streamsToClear = new HashSet<>();
         TokenResponse tokenResponse = rt.getSequencerView().query(streamsToQuery.toArray(new UUID[0]));
         streamsToQuery.forEach(streamId -> {

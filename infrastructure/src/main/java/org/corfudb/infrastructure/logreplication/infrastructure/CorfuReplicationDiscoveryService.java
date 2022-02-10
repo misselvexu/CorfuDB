@@ -30,6 +30,8 @@ import org.corfudb.util.retry.ExponentialBackoffRetry;
 import org.corfudb.util.retry.IRetry;
 import org.corfudb.util.retry.IntervalRetry;
 import org.corfudb.util.retry.RetryNeededException;
+import org.corfudb.utils.LogReplicationStreams;
+import org.corfudb.utils.LogReplicationStreams.TableInfo;
 import org.corfudb.utils.lock.Lock;
 import org.corfudb.utils.lock.LockClient;
 import org.corfudb.utils.lock.LockListener;
@@ -416,18 +418,18 @@ public class CorfuReplicationDiscoveryService implements Runnable, CorfuReplicat
     private LogReplicationConfig getLogReplicationConfiguration(CorfuRuntime runtime) {
 
         try {
-            LogReplicationStreamNameTableManager replicationStreamNameTableManager =
+            LogReplicationStreamNameTableManager replicationStreamInfoManager =
                 new LogReplicationStreamNameTableManager(runtime, serverContext.getPluginConfigFilePath());
 
-            Set<String> streamsToReplicate = replicationStreamNameTableManager.getStreamsToReplicate();
+            Set<TableInfo> streamsToReplicate = replicationStreamInfoManager.getStreamsToReplicate();
 
-            Map<UUID, List<UUID>> streamingConfigSink = replicationStreamNameTableManager.getStreamingConfigOnSink();
+            Map<UUID, List<UUID>> streamingConfigSink = replicationStreamInfoManager.getStreamingConfigOnSink();
 
             Set<UUID> mergeOnlyStreams = LogReplicationStreamNameTableManager.getMergeOnlyStreamIdList();
 
             // TODO pankti: Check if version does not match. If it does not, create an event for site discovery to
             //  do a snapshot sync.
-            boolean upgraded = replicationStreamNameTableManager.isUpgraded();
+            boolean upgraded = replicationStreamInfoManager.isUpgraded();
 
             if (upgraded) {
                 input(new DiscoveryServiceEvent(DiscoveryServiceEvent.DiscoveryServiceEventType.UPGRADE));
@@ -440,7 +442,8 @@ public class CorfuReplicationDiscoveryService implements Runnable, CorfuReplicat
                     mergeOnlyStreams,
                     serverContext.getLogReplicationMaxNumMsgPerBatch(),
                     serverContext.getLogReplicationMaxDataMessageSize(),
-                    serverContext.getLogReplicationCacheMaxSize());
+                    serverContext.getLogReplicationCacheMaxSize(),
+                    replicationStreamInfoManager);
         } catch (Throwable t) {
             log.error("Exception when fetching the Replication Config", t);
             throw t;
@@ -497,6 +500,9 @@ public class CorfuReplicationDiscoveryService implements Runnable, CorfuReplicat
                             localNodeDescriptor, logReplicationMetadataManager, serverContext.getPluginConfigFilePath(),
                             getCorfuRuntime());
                 }
+                // Always sync stream list with metadata table. This will prevent a miss
+                // on recently discovered streams when there is leadership change.
+                replicationContext.getConfig().getStreamsInfo().syncWithInfoTable();
                 replicationManager.setTopology(topologyDescriptor);
                 replicationManager.start();
                 updateReplicationStatus();
