@@ -5,21 +5,31 @@ import lombok.extern.slf4j.Slf4j;
 import org.corfudb.infrastructure.logreplication.LogReplicationConfig;
 import org.corfudb.protocols.logprotocol.OpaqueEntry;
 import org.corfudb.protocols.logprotocol.SMREntry;
+import org.corfudb.runtime.CorfuRuntime;
+import org.corfudb.runtime.CorfuStoreMetadata.TableDescriptors;
+import org.corfudb.runtime.CorfuStoreMetadata.TableMetadata;
+import org.corfudb.runtime.CorfuStoreMetadata.TableName;
 import org.corfudb.runtime.LogReplication.LogReplicationEntryMetadataMsg;
 import org.corfudb.runtime.LogReplication.LogReplicationEntryMsg;
 import org.corfudb.runtime.LogReplication.LogReplicationEntryType;
+import org.corfudb.runtime.collections.CorfuStreamEntry;
 import org.corfudb.runtime.collections.TxnContext;
 import org.corfudb.runtime.view.Address;
 import org.corfudb.infrastructure.logreplication.replication.receive.LogReplicationMetadataManager.LogReplicationMetadataType;
 
 import javax.annotation.concurrent.NotThreadSafe;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import static org.corfudb.protocols.service.CorfuProtocolLogReplication.extractOpaqueEntries;
+import static org.corfudb.runtime.view.TableRegistry.CORFU_SYSTEM_NAMESPACE;
+import static org.corfudb.runtime.view.TableRegistry.REGISTRY_TABLE_NAME;
+import static org.corfudb.runtime.view.TableRegistry.getFullyQualifiedTableName;
 
 
 /**
@@ -29,13 +39,15 @@ import static org.corfudb.protocols.service.CorfuProtocolLogReplication.extractO
 @Slf4j
 public class LogEntryWriter {
     private final LogReplicationMetadataManager logReplicationMetadataManager;
+    private final LogReplicationConfig config;
     private final Set<UUID> streamsSet; //the set of streams that log entry writer will work on.
     private long srcGlobalSnapshot; //the source snapshot that the transaction logs are based
     private long lastMsgTs; //the timestamp of the last message processed.
-    private Map<UUID, List<UUID>> dataStreamToTagsMap;
+    private final Map<UUID, Set<UUID>> dataStreamToTagsMap;
 
     public LogEntryWriter(LogReplicationConfig config, LogReplicationMetadataManager logReplicationMetadataManager) {
         this.logReplicationMetadataManager = logReplicationMetadataManager;
+        this.config = config;
         this.srcGlobalSnapshot = Address.NON_ADDRESS;
         this.lastMsgTs = Address.NON_ADDRESS;
         this.streamsSet = new HashSet<>(config.getStreamsInfo().getStreamIds());
@@ -89,8 +101,6 @@ public class LogEntryWriter {
 
             // Skip Opaque entries with timestamp that are not larger than persistedTs
             OpaqueEntry[] newOpaqueEntryList = opaqueEntryList.stream().filter(x -> x.getVersion() > persistedLogTs).toArray(OpaqueEntry[]::new);
-
-            // TODO: Should we remove this check?
             // Check that all opaque entries contain the correct streams
             for (OpaqueEntry opaqueEntry : newOpaqueEntryList) {
                 if (!streamsSet.containsAll(opaqueEntry.getEntries().keySet())) {
@@ -103,10 +113,35 @@ public class LogEntryWriter {
             logReplicationMetadataManager.appendUpdate(txnContext, LogReplicationMetadataType.LAST_LOG_ENTRY_PROCESSED, entryTs);
 
             for (OpaqueEntry opaqueEntry : newOpaqueEntryList) {
+                // Preprocess the registry table to update the set of streams to replicate and dataStreamToTagsMap
+                for (UUID streamId : opaqueEntry.getEntries().keySet()) {
+                    UUID registryTableId = CorfuRuntime.getStreamID(getFullyQualifiedTableName(CORFU_SYSTEM_NAMESPACE,
+                            REGISTRY_TABLE_NAME));
+                    if (registryTableId.equals(streamId)) {
+                        for (SMREntry smrEntry : opaqueEntry.getEntries().get(registryTableId)) {
+                            CorfuStreamEntry<TableName, TableDescriptors, TableMetadata> corfuStreamEntry = CorfuStreamEntry.fromSMREntry(smrEntry);
+                            UUID currentStreamId = CorfuRuntime.getStreamID(getFullyQualifiedTableName(corfuStreamEntry.getKey()));
+                            if (corfuStreamEntry.getMetadata().getTableOptions().getIsFederated()) {
+                                this.streamsSet.add(currentStreamId);
+                            }
+                            dataStreamToTagsMap.putIfAbsent(currentStreamId, new HashSet<>());
+                            dataStreamToTagsMap.get(currentStreamId).addAll(
+                                    corfuStreamEntry.getMetadata()
+                                            .getTableOptions()
+                                            .getStreamTagList()
+                                            .stream()
+                                            .map(CorfuRuntime::getStreamID)
+                                            .collect(Collectors.toList()));
+                        }
+                        this.config.updateDataStreamToTagsMap(dataStreamToTagsMap, false);
+                        this.config.getStreamsInfo().updateStreamIdsOnStandby(this.streamsSet, false);
+                    }
+                }
+
                 for (UUID streamId : opaqueEntry.getEntries().keySet()) {
                     for (SMREntry smrEntry : opaqueEntry.getEntries().get(streamId)) {
-                        // If stream tags exist for the current stream, it means its intended for streaming on the Sink (receiver)
-                        txnContext.logUpdate(streamId, smrEntry, dataStreamToTagsMap.get(streamId));
+                        // If stream tags exist for the current stream, it means it's intended for streaming on the Sink (receiver)
+                        txnContext.logUpdate(streamId, smrEntry, new ArrayList<>(dataStreamToTagsMap.get(streamId)));
                     }
                 }
             }

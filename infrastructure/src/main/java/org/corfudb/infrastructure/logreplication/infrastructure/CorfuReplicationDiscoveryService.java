@@ -5,6 +5,7 @@ import io.micrometer.core.instrument.LongTaskTimer;
 import io.micrometer.core.instrument.Tag;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+import org.checkerframework.checker.units.qual.C;
 import org.corfudb.common.metrics.micrometer.MeterRegistryProvider;
 import org.corfudb.infrastructure.LogReplicationServer;
 import org.corfudb.infrastructure.ServerContext;
@@ -30,7 +31,6 @@ import org.corfudb.util.retry.ExponentialBackoffRetry;
 import org.corfudb.util.retry.IRetry;
 import org.corfudb.util.retry.IntervalRetry;
 import org.corfudb.util.retry.RetryNeededException;
-import org.corfudb.utils.LogReplicationStreams;
 import org.corfudb.utils.LogReplicationStreams.TableInfo;
 import org.corfudb.utils.lock.Lock;
 import org.corfudb.utils.lock.LockClient;
@@ -44,12 +44,7 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.time.Duration;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -421,9 +416,10 @@ public class CorfuReplicationDiscoveryService implements Runnable, CorfuReplicat
             LogReplicationStreamNameTableManager replicationStreamInfoManager =
                 new LogReplicationStreamNameTableManager(runtime, serverContext.getPluginConfigFilePath());
 
-            Set<TableInfo> streamsToReplicate = replicationStreamInfoManager.getStreamsToReplicate();
-
-            Map<UUID, List<UUID>> streamingConfigSink = replicationStreamInfoManager.getStreamingConfigOnSink();
+            Set<TableInfo> streamsToReplicate = new HashSet<>();
+            if (localClusterDescriptor.getRole() == ClusterRole.ACTIVE) {
+                streamsToReplicate = replicationStreamInfoManager.getStreamsToReplicate();
+            }
 
             Set<UUID> mergeOnlyStreams = LogReplicationStreamNameTableManager.getMergeOnlyStreamIdList();
 
@@ -438,7 +434,6 @@ public class CorfuReplicationDiscoveryService implements Runnable, CorfuReplicat
             log.info("Merge-only stream IDs :: {}", mergeOnlyStreams);
 
             return new LogReplicationConfig(streamsToReplicate,
-                    streamingConfigSink,
                     mergeOnlyStreams,
                     serverContext.getLogReplicationMaxNumMsgPerBatch(),
                     serverContext.getLogReplicationMaxDataMessageSize(),

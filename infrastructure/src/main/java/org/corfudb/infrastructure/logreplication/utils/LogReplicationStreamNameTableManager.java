@@ -22,7 +22,6 @@ import org.corfudb.util.retry.IRetry;
 import org.corfudb.util.retry.IntervalRetry;
 import org.corfudb.util.retry.RetryNeededException;
 import org.corfudb.utils.CommonTypes;
-import org.corfudb.utils.LogReplicationStreams;
 import org.corfudb.utils.LogReplicationStreams.VersionString;
 import org.corfudb.utils.LogReplicationStreams.Version;
 import org.corfudb.utils.LogReplicationStreams.TableInfo;
@@ -33,16 +32,12 @@ import java.lang.reflect.InvocationTargetException;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
-import static org.corfudb.runtime.view.ObjectsView.LOG_REPLICATOR_STREAM_INFO;
 import static org.corfudb.runtime.view.TableRegistry.CORFU_SYSTEM_NAMESPACE;
 import static org.corfudb.runtime.view.TableRegistry.getFullyQualifiedTableName;
 
@@ -85,6 +80,12 @@ public class LogReplicationStreamNameTableManager {
         initStreamNameFetcherPlugin();
     }
 
+    /**
+     * This method is for ACTIVE to fetch streams to replicate from LOG_REPLICATION_STREAMS_INFO_TABLE.
+     * If it doesn't exist, we will create info table by reading from registry table.
+     *
+     * @return Set of TableInfo for streams to replicate from ACTIVE
+     */
     public Set<TableInfo> getStreamsToReplicate() {
         // Initialize the streamsToReplicate
         if (verifyTableExists(LOG_REPLICATION_PLUGIN_VERSION_TABLE) &&
@@ -96,14 +97,12 @@ public class LogReplicationStreamNameTableManager {
             if (!tableVersionMatchesPlugin()) {
                 // delete the tables and recreate them
                 deleteExistingStreamNameAndVersionTables();
-                createStreamNameAndVersionTables(
-                    logReplicationConfigAdapter.fetchStreamsToReplicate());
+                createStreamNameAndVersionTables(this.readStreamsToReplicateFromRegistry(this.runtime.getAddressSpaceView().getLogTail()));
             }
         } else {
             // If any 1 of the 2 tables does not exist, delete and recreate them both as they may have been corrupted.
             deleteExistingStreamNameAndVersionTables();
-            createStreamNameAndVersionTables(
-                logReplicationConfigAdapter.fetchStreamsToReplicate());
+            createStreamNameAndVersionTables(this.readStreamsToReplicateFromRegistry(this.runtime.getAddressSpaceView().getLogTail()));
         }
         return readStreamsToReplicateFromTable();
     }
@@ -140,15 +139,8 @@ public class LogReplicationStreamNameTableManager {
             throws RetryNeededException {
         try (TxnContext txn = corfuStore.txn(CORFU_SYSTEM_NAMESPACE)) {
             for (UUID id : streamIdSet) {
-                LogReplicationStreams.TableInfo tableInfo =
-                        LogReplicationStreams.TableInfo.newBuilder()
-                                .setId(id.toString())
-                                .build();
-
-                LogReplicationStreams.Namespace namespace =
-                        LogReplicationStreams.Namespace.newBuilder()
-                                .setName(EMPTY_STR)
-                                .build();
+                TableInfo tableInfo = TableInfo.newBuilder().setId(id.toString()).build();
+                Namespace namespace = Namespace.newBuilder().setName(EMPTY_STR).build();
                 txn.putRecord(streamsInfoTable, tableInfo, namespace, defaultMetadata);
             }
             txn.commit();
@@ -231,7 +223,7 @@ public class LogReplicationStreamNameTableManager {
         }
     }
 
-    private void createStreamNameAndVersionTables(Set<String> streams) {
+    private void createStreamNameAndVersionTables(Set<TableInfo> streamInfos) {
         try {
             Table<TableInfo, Namespace, CommonTypes.Uuid> streamInfoTable = corfuStore.openTable(CORFU_SYSTEM_NAMESPACE,
                 LOG_REPLICATION_STREAMS_INFO_TABLE,
@@ -243,37 +235,31 @@ public class LogReplicationStreamNameTableManager {
                 VersionString.class, Version.class, CommonTypes.Uuid.class,
                 TableOptions.builder().build());
 
-            // add registryTable to the streams
-            String registryTable = getFullyQualifiedTableName(
-                    CORFU_SYSTEM_NAMESPACE, TableRegistry.REGISTRY_TABLE_NAME);
-            streams.add(registryTable);
-
-            // add protobufDescriptorTable to the streams
-            String protoTable = getFullyQualifiedTableName(
-                    CORFU_SYSTEM_NAMESPACE, TableRegistry.PROTOBUF_DESCRIPTOR_TABLE_NAME);
-            streams.add(protoTable);
-
             try (TxnContext txn = corfuStore.txn(CORFU_SYSTEM_NAMESPACE)) {
                 // Populate the plugin version in the version table
-                LogReplicationStreams.VersionString versionString = VersionString.newBuilder()
-                                .setName("VERSION").build();
-                LogReplicationStreams.Version version = Version.newBuilder()
-                                .setVersion(logReplicationConfigAdapter.getVersion()).build();
+                VersionString versionString = VersionString.newBuilder().setName("VERSION").build();
+                Version version = Version.newBuilder().setVersion(logReplicationConfigAdapter.getVersion()).build();
                 txn.putRecord(pluginVersionTable, versionString, version, defaultMetadata);
 
-                // Copy all stream names to the stream names table.  Each name is
+                // As each name is fully qualified, no need to insert the
+                // namespace.  Simply insert an empty string there.
+                // TODO: Ideally the Namespace protobuf can be removed but it
+                //  will involve data migration on upgrade as it is a schema
+                //  change
+                Namespace namespace = Namespace.newBuilder().setName(EMPTY_STR).build();
+                // add registryTable to the stream into table
+                String registryTableName = getFullyQualifiedTableName(
+                        CORFU_SYSTEM_NAMESPACE, TableRegistry.REGISTRY_TABLE_NAME);
+                txn.putRecord(streamInfoTable, TableInfo.newBuilder().setName(registryTableName).build(),
+                        namespace, defaultMetadata);
+                // add protobufDescriptorTable to the stream into table
+                String protoTableName = getFullyQualifiedTableName(
+                        CORFU_SYSTEM_NAMESPACE, TableRegistry.PROTOBUF_DESCRIPTOR_TABLE_NAME);
+                txn.putRecord(streamInfoTable, TableInfo.newBuilder().setName(protoTableName).build(),
+                        namespace, defaultMetadata);
+                // Copy all stream names to the stream info table.  Each name is
                 // a fully qualified stream name
-                for (String entry : streams) {
-                    LogReplicationStreams.TableInfo tableInfo = TableInfo.newBuilder().setName(entry).build();
-
-                    // As each name is fully qualified, no need to insert the
-                    // namespace.  Simply insert an empty string there.
-                    // TODO: Ideally the Namespace protobuf can be removed but it
-                    //  will involve data migration on upgrade as it is a schema
-                    //  change
-                    LogReplicationStreams.Namespace namespace = Namespace.newBuilder().setName(
-                                    EMPTY_STR)
-                                    .build();
+                for (TableInfo tableInfo : streamInfos) {
                     txn.putRecord(streamInfoTable, tableInfo, namespace, defaultMetadata);
                 }
                 txn.commit();
@@ -293,7 +279,7 @@ public class LogReplicationStreamNameTableManager {
         return tableInfoSet;
     }
 
-    public Set<TableInfo> readStreamsToReplicatedFromRegistry(long ts) {
+    public Set<TableInfo> readStreamsToReplicateFromRegistry(long ts) {
 
         Set<TableInfo> tableInfoSet = new HashSet<>();
         CorfuTable<CorfuStoreMetadata.TableName, CorfuRecord<CorfuStoreMetadata.TableDescriptors,
@@ -320,28 +306,6 @@ public class LogReplicationStreamNameTableManager {
         runtime.getObjectsView().TXEnd();
 
         return tableInfoSet;
-    }
-
-    /**
-     * Get stream tags to send data change notifications to on the receiver (sink / standby site)
-     *
-     * Stream tags will be read from a static configuration file. This file should contain not only
-     * the stream tag of interest (namespace, tag), i.e., the stream tag we wish to receive notifications on
-     * but also the table names of interest within that tag.
-     *
-     * Note that, we need the mapping as we cannot infer the stream tag from the replicated data on the sink.
-     * Data is replicated at the stream level and not deserialized, hence we cannot infer from the transferred log
-     * entries, the tags associated to them.
-     *
-     * @return map of stream tag UUID to data streams UUIDs.
-     */
-    public Map<UUID, List<UUID>> getStreamingConfigOnSink() {
-        Map<UUID, List<UUID>> streamingConfig = logReplicationConfigAdapter.getStreamingConfigOnSink();
-        for (UUID id : MERGE_ONLY_STREAM_ID_LIST) {
-            streamingConfig.put(id,
-                    Collections.singletonList(LOG_REPLICATOR_STREAM_INFO.getStreamId()));
-        }
-        return streamingConfig;
     }
 
     public static Set<UUID> getMergeOnlyStreamIdList() {

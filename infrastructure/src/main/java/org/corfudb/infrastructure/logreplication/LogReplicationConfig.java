@@ -12,7 +12,6 @@ import org.corfudb.utils.LogReplicationStreams.TableInfo;
 
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -48,7 +47,7 @@ public class LogReplicationConfig {
     private final StreamInfo streamsInfo;
 
     // Streaming tags on Sink/Standby (map data stream id to list of tags associated to it)
-    private Map<UUID, List<UUID>> dataStreamToTagsMap = new HashMap<>();
+    private Map<UUID, Set<UUID>> dataStreamToTagsMap = new HashMap<>();
 
     // Set of streams that shouldn't be cleared on snapshot apply phase, as these
     // streams should be the result of "merging" the replicated data (from active) + local data (on standby).
@@ -105,12 +104,18 @@ public class LogReplicationConfig {
         this(streamsToReplicate, maxNumMsgPerBatch, maxMsgSize, MAX_CACHE_NUM_ENTRIES, null);
     }
 
-    public LogReplicationConfig(Set<TableInfo> streamsToReplicate, Map<UUID, List<UUID>> streamingTagsMap,
+    public LogReplicationConfig(Set<TableInfo> streamsToReplicate,
                                 Set<UUID> mergeOnlyStreams, int maxNumMsgPerBatch, int maxMsgSize,
                                 int cacheSize, LogReplicationStreamNameTableManager streamInfoManager) {
         this(streamsToReplicate, maxNumMsgPerBatch, maxMsgSize, cacheSize, streamInfoManager);
-        this.dataStreamToTagsMap = streamingTagsMap;
         this.mergeOnlyStreams = mergeOnlyStreams;
+    }
+
+    public void updateDataStreamToTagsMap(Map<UUID, Set<UUID>> newStreamTagsMap, boolean shouldClear) {
+        if (shouldClear) {
+            this.dataStreamToTagsMap.clear();
+        }
+        dataStreamToTagsMap.putAll(newStreamTagsMap);
     }
 
     /**
@@ -124,7 +129,8 @@ public class LogReplicationConfig {
                           @NonNull LogReplicationStreamNameTableManager streamInfoManager) {
             this.streamInfoManager = streamInfoManager;
             this.streamIds = new HashSet<>();
-            refreshStreamIds(streamsToReplicate, true);
+            // No need to clear the set as the field is just initialized.
+            refreshStreamIds(streamsToReplicate, false);
         }
 
         private void refreshStreamIds(Set<TableInfo> streamsToReplicate, boolean shouldClear) {
@@ -139,6 +145,14 @@ public class LogReplicationConfig {
                     this.streamIds.add(UUID.fromString(info.getId()));
                 }
             }
+        }
+
+        public void updateStreamIdsOnStandby(Set<UUID> streamsToReplicate, boolean shouldClear) {
+            if (shouldClear) {
+                this.streamIds.clear();
+            }
+
+            this.streamIds.addAll(streamsToReplicate);
         }
 
         public void syncWithInfoTable() {
@@ -159,7 +173,7 @@ public class LogReplicationConfig {
                 return;
             }
 
-            Set<TableInfo> registryInfo = streamInfoManager.readStreamsToReplicatedFromRegistry(timestamp);
+            Set<TableInfo> registryInfo = streamInfoManager.readStreamsToReplicateFromRegistry(timestamp);
             // We don't refresh the stream ids here because this method is called only before snapshot
             // sync as a supplementary
             refreshStreamIds(registryInfo, false);
