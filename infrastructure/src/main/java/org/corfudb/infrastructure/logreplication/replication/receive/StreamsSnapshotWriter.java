@@ -415,7 +415,7 @@ public class StreamsSnapshotWriter implements SnapshotWriter {
         });
         // Get streams to replicate from registry table and update log replication config.
         Set<UUID> streamsToReplicate = registryTable.entryStream()
-                .filter((entry -> entry.getValue().getMetadata().getTableOptions().getIsFederated()))
+                .filter(entry -> entry.getValue().getMetadata().getTableOptions().getIsFederated())
                 .map(entry -> CorfuRuntime.getStreamID(getFullyQualifiedTableName(entry.getKey())))
                 .collect(Collectors.toSet());
         // Update the dataStreamToTagsMap in LogReplicationConfig, clear the existing mapping as

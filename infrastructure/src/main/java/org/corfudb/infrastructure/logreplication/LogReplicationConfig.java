@@ -72,36 +72,19 @@ public class LogReplicationConfig {
      * Constructor
      *
      * @param streamsToReplicate Info for all streams to be replicated across sites.
-     */
-    @VisibleForTesting
-    public LogReplicationConfig(Set<TableInfo> streamsToReplicate) {
-        this(streamsToReplicate, DEFAULT_MAX_NUM_MSG_PER_BATCH, MAX_DATA_MSG_SIZE_SUPPORTED,
-                MAX_CACHE_NUM_ENTRIES, null);
-    }
-
-    /**
-     * Constructor
-     *
-     * @param streamsToReplicate Info for all streams to be replicated across sites.
      * @param maxNumMsgPerBatch snapshot sync batch size (number of entries per batch)
      */
     public LogReplicationConfig(Set<TableInfo> streamsToReplicate, int maxNumMsgPerBatch, int maxMsgSize,
                                 int cacheSize, LogReplicationStreamNameTableManager streamInfoManager) {
-        this.streamsInfo = new StreamInfo(streamsToReplicate, streamInfoManager);
+        if (streamInfoManager == null) {
+            this.streamsInfo = new StreamInfo(streamsToReplicate);
+        } else {
+            this.streamsInfo = new StreamInfo(streamsToReplicate, streamInfoManager);
+        }
         this.maxNumMsgPerBatch = maxNumMsgPerBatch;
         this.maxMsgSize = maxMsgSize;
         this.maxCacheSize = cacheSize;
         this.maxDataSizePerMsg = maxMsgSize * DATA_FRACTION_PER_MSG / 100;
-    }
-
-    /**
-     * Constructor
-     *
-     * @param streamsToReplicate Info for all streams to be replicated across sites
-     * @param maxNumMsgPerBatch snapshot sync batch size (number of entries per batch)
-     */
-    public LogReplicationConfig(Set<TableInfo> streamsToReplicate, int maxNumMsgPerBatch, int maxMsgSize) {
-        this(streamsToReplicate, maxNumMsgPerBatch, maxMsgSize, MAX_CACHE_NUM_ENTRIES, null);
     }
 
     public LogReplicationConfig(Set<TableInfo> streamsToReplicate,
@@ -111,6 +94,35 @@ public class LogReplicationConfig {
         this.mergeOnlyStreams = mergeOnlyStreams;
     }
 
+    /**
+     * Constructor
+     *
+     * @param streamsToReplicate Info for all streams to be replicated across sites
+     * @param maxNumMsgPerBatch snapshot sync batch size (number of entries per batch)
+     */
+    @VisibleForTesting
+    public LogReplicationConfig(Set<TableInfo> streamsToReplicate, int maxNumMsgPerBatch, int maxMsgSize) {
+        this(streamsToReplicate, maxNumMsgPerBatch, maxMsgSize, MAX_CACHE_NUM_ENTRIES, null);
+    }
+
+    /**
+     * Constructor
+     *
+     * @param streamsToReplicate Info for all streams to be replicated across sites.
+     */
+    @VisibleForTesting
+    public LogReplicationConfig(Set<TableInfo> streamsToReplicate) {
+        this(streamsToReplicate, DEFAULT_MAX_NUM_MSG_PER_BATCH, MAX_DATA_MSG_SIZE_SUPPORTED,
+                MAX_CACHE_NUM_ENTRIES, null);
+    }
+
+    /**
+     * This method is supposed to be invoked at the STANDBY side cluster to update the streams to their
+     * tags map during snapshot sync and delta sync.
+     *
+     * @param newStreamTagsMap The newly discovered / collected stream to tags map
+     * @param shouldClear Boolean field to check if we need to clear the present map. Set to true in Snapshot sync.
+     */
     public void updateDataStreamToTagsMap(Map<UUID, Set<UUID>> newStreamTagsMap, boolean shouldClear) {
         if (shouldClear) {
             this.dataStreamToTagsMap.clear();
@@ -130,6 +142,13 @@ public class LogReplicationConfig {
             this.streamInfoManager = streamInfoManager;
             this.streamIds = new HashSet<>();
             // No need to clear the set as the field is just initialized.
+            refreshStreamIds(streamsToReplicate, false);
+        }
+
+        @VisibleForTesting
+        public StreamInfo(@NonNull Set<TableInfo> streamsToReplicate) {
+            this.streamInfoManager = null;
+            this.streamIds = new HashSet<>();
             refreshStreamIds(streamsToReplicate, false);
         }
 

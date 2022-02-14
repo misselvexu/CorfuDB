@@ -25,7 +25,6 @@ import org.corfudb.runtime.view.StreamOptions;
 import org.corfudb.runtime.view.stream.IStreamView;
 import org.corfudb.util.serializer.ISerializer;
 import org.corfudb.util.serializer.Serializers;
-import org.corfudb.utils.LogReplicationStreams;
 import org.corfudb.utils.LogReplicationStreams.TableInfo;
 import org.junit.Test;
 
